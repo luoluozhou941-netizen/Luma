@@ -1,34 +1,42 @@
 package com.luoluo.luma
 
 import android.annotation.SuppressLint
-import android.content.Intent
-import android.graphics.Color
 import android.net.Uri
 import android.os.Bundle
 import android.os.Environment
-import android.view.ViewGroup
 import android.webkit.JavascriptInterface
 import android.webkit.ValueCallback
-import android.webkit.WebChromeClient
-import android.webkit.WebSettings
 import android.webkit.WebView
-import android.webkit.WebViewClient
-import android.widget.FrameLayout
-import android.widget.Toast
-import androidx.activity.OnBackPressedCallback
+import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.biometric.BiometricPrompt
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
 import androidx.core.content.ContextCompat
-import androidx.core.view.ViewCompat
-import androidx.core.view.WindowCompat
-import androidx.core.view.WindowInsetsCompat
 import androidx.fragment.app.FragmentActivity
+import com.luoluo.luma.ui.theme.LumaTheme
 import java.io.File
 import java.io.FileOutputStream
 
+/**
+ * 1a步：只验证Compose工具链能不能跑起来，界面先放一个占位文字。
+ *
+ * WebView那套（LumaJsBridge、指纹加解密相关方法）先原样留在这里没删，
+ * 但这一步不再初始化webView、也不会显示WebView了，assets/luma/整个文件夹已经删掉。
+ * 这些方法目前是"挂着但没人调用"的死代码，等以后要迁移加密功能到Compose版本时再处理，
+ * 现在留着是为了不丢失原来的实现细节，方便对照。
+ */
 class MainActivity : FragmentActivity() {
 
-    private lateinit var webView: WebView
+    // 原来是 lateinit，现在没有WebView可用了，改成可空类型，
+    // 防止onDestroy这些生命周期方法访问到未初始化的属性而崩溃。
+    private var webView: WebView? = null
     private var fileChooserCallback: ValueCallback<Array<Uri>>? = null
 
     class LumaJsBridge(private val activity: MainActivity) {
@@ -41,18 +49,12 @@ class MainActivity : FragmentActivity() {
                     dir.mkdirs()
                     val file = File(dir, fileName)
                     FileOutputStream(file).use { it.write(jsonData.toByteArray(Charsets.UTF_8)) }
-                    Toast.makeText(activity, "✅ 已导出: ${file.absolutePath}", Toast.LENGTH_LONG).show()
                 } catch (e: Exception) {
-                    Toast.makeText(activity, "导出失败: ${e.message}", Toast.LENGTH_LONG).show()
+                    // 死代码阶段，先不处理
                 }
             }
         }
 
-        /**
-         * 网页那边想加密一段文字（比如刚填好的API key），调这个方法。
-         * requestId 是网页自己生成的一个随便什么字符串，用来在回调里对上号
-         * （网页那边可能同时发出好几个请求，靠这个 id 区分哪个结果对应哪个请求）。
-         */
         @JavascriptInterface
         fun requestEncrypt(plainText: String, requestId: String) {
             activity.runOnUiThread {
@@ -60,7 +62,6 @@ class MainActivity : FragmentActivity() {
             }
         }
 
-        /** 网页那边想解密一段之前存过的密文，调这个方法。 */
         @JavascriptInterface
         fun requestDecrypt(packedCipherText: String, requestId: String) {
             activity.runOnUiThread {
@@ -69,7 +70,6 @@ class MainActivity : FragmentActivity() {
         }
     }
 
-    /** 弹一次指纹/面容验证，验证通过后加密，结果送回网页那边。 */
     private fun showBiometricThenEncrypt(plainText: String, requestId: String) {
         try {
             val cipher = CryptoManager.prepareEncryptCipher()
@@ -94,9 +94,7 @@ class MainActivity : FragmentActivity() {
                         sendCryptoResultToJs(requestId, success = false, payload = "验证未通过: $errString")
                     }
 
-                    override fun onAuthenticationFailed() {
-                        // 指纹没对上这种情况，系统自己会让用户重试，这里不用做什么
-                    }
+                    override fun onAuthenticationFailed() {}
                 }
             )
             prompt.authenticate(biometricPromptInfo(), cryptoObject)
@@ -105,7 +103,6 @@ class MainActivity : FragmentActivity() {
         }
     }
 
-    /** 弹一次指纹/面容验证，验证通过后解密，结果送回网页那边。 */
     private fun showBiometricThenDecrypt(packedCipherText: String, requestId: String) {
         try {
             val (iv, encryptedBytes) = CryptoManager.unpackEncrypted(packedCipherText)
@@ -130,9 +127,7 @@ class MainActivity : FragmentActivity() {
                         sendCryptoResultToJs(requestId, success = false, payload = "验证未通过: $errString")
                     }
 
-                    override fun onAuthenticationFailed() {
-                        // 指纹没对上这种情况，系统自己会让用户重试，这里不用做什么
-                    }
+                    override fun onAuthenticationFailed() {}
                 }
             )
             prompt.authenticate(biometricPromptInfo(), cryptoObject)
@@ -151,35 +146,27 @@ class MainActivity : FragmentActivity() {
             )
             .build()
 
-    /**
-     * 把结果送回网页那边。网页那边需要提前准备好一个全局函数：
-     * window.LumaCryptoCallback = function(requestId, success, payload) { ... }
-     * success 是 true/false，payload 成功时是结果内容，失败时是错误说明文字。
-     * （这部分JS代码等做网页那边的接入时再一起写。）
-     */
     private fun sendCryptoResultToJs(requestId: String, success: Boolean, payload: String) {
         runOnUiThread {
             val safeRequestId = org.json.JSONObject.quote(requestId)
             val safePayload = org.json.JSONObject.quote(payload)
             val js = "window.LumaCryptoCallback && window.LumaCryptoCallback($safeRequestId, $success, $safePayload)"
-            webView.evaluateJavascript(js, null)
+            webView?.evaluateJavascript(js, null)
         }
     }
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        WindowCompat.setDecorFitsSystemWindows(window, false)
 
-        val fileChooserLauncher = registerForActivityResult(
+        // 文件选择器的launcher先留着注册，虽然1a阶段用不上，1b/1c做导入功能时会用到。
+        registerForActivityResult(
             ActivityResultContracts.StartActivityForResult()
         ) { result ->
             if (result.resultCode == RESULT_OK) {
                 val data = result.data
                 val uris = if (data?.clipData != null) {
-                    Array(data.clipData!!.itemCount) { i ->
-                        data.clipData!!.getItemAt(i).uri
-                    }
+                    Array(data.clipData!!.itemCount) { i -> data.clipData!!.getItemAt(i).uri }
                 } else {
                     data?.data?.let { arrayOf(it) } ?: arrayOf()
                 }
@@ -190,116 +177,33 @@ class MainActivity : FragmentActivity() {
             fileChooserCallback = null
         }
 
-        val container = FrameLayout(this).apply {
-            layoutParams = ViewGroup.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.MATCH_PARENT
-            )
-            setBackgroundColor(Color.parseColor("#F5EFE2"))
-        }
-
-        webView = WebView(this).apply {
-            layoutParams = FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT,
-                FrameLayout.LayoutParams.MATCH_PARENT
-            )
-            setBackgroundColor(Color.parseColor("#F5EFE2"))
-            settings.apply {
-                javaScriptEnabled = true
-                domStorageEnabled = true
-                databaseEnabled = true
-                allowFileAccess = true
-                allowContentAccess = true
-                cacheMode = WebSettings.LOAD_DEFAULT
-                mediaPlaybackRequiresUserGesture = false
-                mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-            }
-            webViewClient = WebViewClient()
-            webChromeClient = object : WebChromeClient() {
-                override fun onShowFileChooser(
-                    webView: WebView?,
-                    filePathCallback: ValueCallback<Array<Uri>>?,
-                    fileChooserParams: FileChooserParams?
-                ): Boolean {
-                    fileChooserCallback?.onReceiveValue(null)
-                    fileChooserCallback = filePathCallback
-                    val mimeTypes: Array<String> = fileChooserParams?.acceptTypes
-                        ?.filter { it.isNotBlank() }
-                        ?.toTypedArray()
-                        ?.takeIf { it.isNotEmpty() }
-                        ?: arrayOf("application/json", "text/plain")
-                    val intent = Intent(Intent.ACTION_GET_CONTENT).apply {
-                        addCategory(Intent.CATEGORY_OPENABLE)
-                        type = mimeTypes.firstOrNull() ?: "*/*"
-                        if (mimeTypes.size > 1) {
-                            putExtra(Intent.EXTRA_MIME_TYPES, mimeTypes)
-                        }
-                    }
-                    try {
-                        fileChooserLauncher.launch(Intent.createChooser(intent, "选择文件"))
-                    } catch (e: Exception) {
-                        fileChooserCallback?.onReceiveValue(null)
-                        fileChooserCallback = null
-                        return false
-                    }
-                    return true
-                }
-            }
-            addJavascriptInterface(LumaJsBridge(this@MainActivity), "LumaBridge")
-        }
-        container.addView(webView)
-
-        ViewCompat.setOnApplyWindowInsetsListener(container) { view, insets ->
-            val bars = insets.getInsets(
-                WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.ime()
-            )
-            view.setPadding(bars.left, bars.top, bars.right, bars.bottom)
-            insets
-        }
-
-        setContentView(container)
-
-        container.post { ViewCompat.requestApplyInsets(container) }
-
-        container.post {
-            if (container.paddingTop == 0) {
-                var statusBarHeight = 0
-                val resId = resources.getIdentifier("status_bar_height", "dimen", "android")
-                if (resId > 0) statusBarHeight = resources.getDimensionPixelSize(resId)
-                var navBarHeight = 0
-                val navId = resources.getIdentifier("navigation_bar_height", "dimen", "android")
-                if (navId > 0) navBarHeight = resources.getDimensionPixelSize(navId)
-                if (statusBarHeight > 0) {
-                    container.setPadding(0, statusBarHeight, 0, navBarHeight)
-                }
+        setContent {
+            LumaTheme {
+                LumaApp()
             }
         }
-
-        if (savedInstanceState == null) {
-            webView.loadUrl("file:///android_asset/luma/index.html")
-        } else {
-            webView.restoreState(savedInstanceState)
-        }
-
-        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
-            override fun handleOnBackPressed() {
-                if (webView.canGoBack()) {
-                    webView.goBack()
-                } else {
-                    isEnabled = false
-                    onBackPressedDispatcher.onBackPressed()
-                }
-            }
-        })
-    }
-
-    override fun onSaveInstanceState(outState: Bundle) {
-        super.onSaveInstanceState(outState)
-        webView.saveState(outState)
     }
 
     override fun onDestroy() {
-        webView.destroy()
+        webView?.destroy()
         super.onDestroy()
+    }
+}
+
+@Composable
+fun LumaApp() {
+    Surface(
+        modifier = Modifier.fillMaxSize(),
+        color = MaterialTheme.colorScheme.background
+    ) {
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = "Hello Luma",
+                style = MaterialTheme.typography.headlineMedium
+            )
+        }
     }
 }
