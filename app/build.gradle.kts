@@ -8,6 +8,7 @@ plugins {
 }
 
 // 读取 local.properties 里的密码，这个文件不会进git仓库，密码不会跟着代码一起公开
+// CI结力时加不到密码不会所错，只要 release 编译时才需要密码。
 val localProperties = Properties()
 val localPropertiesFile = rootProject.file("local.properties")
 if (localPropertiesFile.exists()) {
@@ -16,10 +17,7 @@ if (localPropertiesFile.exists()) {
 val lumaKeystorePassword: String =
     (localProperties.getProperty("LUMA_KEYSTORE_PASSWORD")
         ?: System.getenv("LUMA_KEYSTORE_PASSWORD"))
-        ?: throw GradleException(
-            "没找到签名密码。请在项目根目录的 local.properties 文件里加一行：\n" +
-            "LUMA_KEYSTORE_PASSWORD=你的密码"
-        )
+        ?: ""  // CI 编近时加不到密根，不要所错
 
 android {
     namespace = "com.luoluo.luma"
@@ -44,9 +42,8 @@ android {
 
     buildTypes {
         debug {
-            // 测试版不用自己的私钥了，交给系统自带的免费测试签名，
+            // 测试版不收用自己的私查了，交给登尖系统 System Default 测诗签名，
             // 这样CI(GitHub Actions)编译的时候不用配置任何密码/密钥，直接能跑。
-            // 正式发布版(release)不受影响，还是用下面那把自己的私钥。
         }
         release {
             isMinifyEnabled = false
