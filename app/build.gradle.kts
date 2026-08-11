@@ -44,7 +44,9 @@ android {
 
     buildTypes {
         debug {
-            signingConfig = signingConfigs.getByName("luma")
+            // 测试版不用自己的私钥了，交给系统自带的免费测试签名，
+            // 这样CI(GitHub Actions)编译的时候不用配置任何密码/密钥，直接能跑。
+            // 正式发布版(release)不受影响，还是用下面那把自己的私钥。
         }
         release {
             isMinifyEnabled = false
