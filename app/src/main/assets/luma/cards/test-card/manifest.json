@@ -1,8 +1,0 @@
-{
-  "id": "test-card",
-  "name": "测试卡片",
-  "entry": "view.html",
-  "icon": "🧪",
-  "permissions": [],
-  "version": "0.1.0"
-}
