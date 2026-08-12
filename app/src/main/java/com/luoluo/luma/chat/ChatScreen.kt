@@ -161,7 +161,7 @@ private fun MessageBubble(msg: ChatMessage) {
             shape = MaterialTheme.shapes.medium
         ) {
             Text(
-                text = msg.content.ifEmpty { "…" },
+                text = msg.content.value.ifEmpty { "…" },
                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
             )
         }
