@@ -229,7 +229,7 @@ object AiClient {
             messages.forEach { m ->
                 msgArray.put(JSONObject().apply {
                     put("role", m.role)
-                    put("content", m.content)
+                    put("content", m.content.value)
                 })
             }
             JSONObject().apply {
@@ -249,7 +249,7 @@ object AiClient {
             messages.forEach { m ->
                 msgArray.put(JSONObject().apply {
                     put("role", m.role)
-                    put("content", m.content)
+                    put("content", m.content.value)
                 })
             }
             JSONObject().apply {
