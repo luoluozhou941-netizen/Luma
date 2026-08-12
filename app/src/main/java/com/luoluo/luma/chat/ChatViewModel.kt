@@ -7,6 +7,7 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -64,17 +65,13 @@ class ChatViewModel : ViewModel() {
         viewModelScope.launch {
             try {
                 if (useStreaming) {
-                    withContext(Dispatchers.IO) {
-                        AiClient.streamCall(cfg, systemPrompt, historyForRequest) { fullTextSoFar ->
-                            // streamCall的回调是在IO线程里同步触发的，Compose state不建议在后台线程直接改，
-                            // 这里用viewModelScope重新launch一个主线程协程来做这次更新。
-                            viewModelScope.launch(Dispatchers.Main) {
-                                aiMsg.content = fullTextSoFar
-                                val idx = messages.indexOfFirst { it === aiMsg }
-                                if (idx >= 0) messages[idx] = aiMsg.copy()
-                            }
+                    AiClient.streamCallFlow(cfg, systemPrompt, historyForRequest)
+                        .flowOn(Dispatchers.IO) // 网络读在IO线程跑，collect{}这块还是在主线程收
+                        .collect { fullTextSoFar ->
+                            aiMsg.content = fullTextSoFar
+                            val idx = messages.indexOfFirst { it === aiMsg }
+                            if (idx >= 0) messages[idx] = aiMsg.copy()
                         }
-                    }
                 } else {
                     val result = withContext(Dispatchers.IO) {
                         AiClient.callNonStream(cfg, systemPrompt, historyForRequest)
