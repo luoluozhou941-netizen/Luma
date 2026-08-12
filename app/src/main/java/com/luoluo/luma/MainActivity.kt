@@ -10,16 +10,14 @@ import android.webkit.WebView
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.biometric.BiometricPrompt
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
+import com.luoluo.luma.chat.ChatScreen
 import com.luoluo.luma.ui.theme.LumaTheme
 import java.io.File
 import java.io.FileOutputStream
@@ -196,14 +194,6 @@ fun LumaApp() {
         modifier = Modifier.fillMaxSize(),
         color = MaterialTheme.colorScheme.background
     ) {
-        Box(
-            modifier = Modifier.fillMaxSize(),
-            contentAlignment = Alignment.Center
-        ) {
-            Text(
-                text = "Hello Luma",
-                style = MaterialTheme.typography.headlineMedium
-            )
-        }
+        ChatScreen()
     }
 }
