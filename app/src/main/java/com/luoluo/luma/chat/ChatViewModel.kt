@@ -68,17 +68,13 @@ class ChatViewModel : ViewModel() {
                     AiClient.streamCallFlow(cfg, systemPrompt, historyForRequest)
                         .flowOn(Dispatchers.IO) // 网络读在IO线程跑，collect{}这块还是在主线程收
                         .collect { fullTextSoFar ->
-                            aiMsg.content = fullTextSoFar
-                            val idx = messages.indexOfFirst { it === aiMsg }
-                            if (idx >= 0) messages[idx] = aiMsg.copy()
+                            aiMsg.content.value = fullTextSoFar
                         }
                 } else {
                     val result = withContext(Dispatchers.IO) {
                         AiClient.callNonStream(cfg, systemPrompt, historyForRequest)
                     }
-                    aiMsg.content = result
-                    val idx = messages.indexOfFirst { it === aiMsg }
-                    if (idx >= 0) messages[idx] = aiMsg.copy()
+                    aiMsg.content.value = result
                 }
                 uiState = ChatUiState.Idle
             } catch (e: Exception) {
