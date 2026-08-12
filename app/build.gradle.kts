@@ -80,7 +80,12 @@ dependencies {
     implementation("androidx.compose.ui:ui-graphics")
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material3:material3")
-    implementation("androidx.biometric:biometric:1.2.1")
+    implementation("androidx.biometric:biometric:1.1.0")
+
+    // 1b新增：AI通信用OkHttp手写请求(含流式SSE手动解析)，用协程处理异步
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
+    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.5")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
 }
