@@ -1,88 +1,11 @@
-import java.util.Properties
-import java.io.FileInputStream
-
+// 根目录构建文件：只负责声明插件版本，不在这里应用
+// 真正的 android {} 配置在 app/build.gradle.kts 里
 plugins {
-    id("com.android.application")
-    id("org.jetbrains.kotlin.android")
-    id("org.jetbrains.kotlin.plugin.compose")
-}
-
-// 读取 local.properties 里的密码，这个文件不会进git仓库，密码不会跟着代码一起公开
-val localProperties = Properties()
-val localPropertiesFile = rootProject.file("local.properties")
-if (localPropertiesFile.exists()) {
-    localProperties.load(FileInputStream(localPropertiesFile))
-}
-val lumaKeystorePassword: String =
-    (localProperties.getProperty("LUMA_KEYSTORE_PASSWORD")
-        ?: System.getenv("LUMA_KEYSTORE_PASSWORD"))
-        ?: throw GradleException(
-            "没找到签名密码。请在项目根目录的 local.properties 文件里加一行：\n" +
-            "LUMA_KEYSTORE_PASSWORD=你的密码"
-        )
-
-android {
-    namespace = "com.luoluo.luma"
-    compileSdk = 35
-
-    defaultConfig {
-        applicationId = "com.luoluo.luma"
-        minSdk = 26
-        targetSdk = 35
-        versionCode = 5
-        versionName = "0.5.0"
-    }
-
-    signingConfigs {
-        create("luma") {
-            storeFile = file("luma-release.jks")
-            storePassword = lumaKeystorePassword
-            keyAlias = "luma"
-            keyPassword = lumaKeystorePassword
-        }
-    }
-
-    buildTypes {
-        debug {
-            signingConfig = signingConfigs.getByName("luma")
-        }
-        release {
-            isMinifyEnabled = false
-            signingConfig = signingConfigs.getByName("luma")
-            proguardFiles(
-                getDefaultProguardFile("proguard-android-optimize.txt"),
-                "proguard-rules.pro"
-            )
-        }
-    }
-
-    compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_17
-        targetCompatibility = JavaVersion.VERSION_17
-    }
-
-    kotlinOptions {
-        jvmTarget = "17"
-    }
-
-    buildFeatures {
-        compose = true
-    }
-}
-
-dependencies {
-    val composeBom = platform("androidx.compose:compose-bom:2024.09.00")
-    implementation(composeBom)
-
-    implementation("androidx.core:core-ktx:1.13.1")
-    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.5")
-    implementation("androidx.activity:activity-compose:1.9.2")
-    implementation("androidx.compose.ui:ui")
-    implementation("androidx.compose.ui:ui-graphics")
-    implementation("androidx.compose.ui:ui-tooling-preview")
-    implementation("androidx.compose.material3:material3")
-    // 指纹/面容验证 + 安全存钥匙用的
-    implementation("androidx.biometric:biometric:1.1.0")
-
-    debugImplementation("androidx.compose.ui:ui-tooling")
+    id("com.android.application") version "8.6.0" apply false
+    id("org.jetbrains.kotlin.android") version "2.0.20" apply false
+    id("org.jetbrains.kotlin.plugin.compose") version "2.0.20" apply false
+    // 1c新增：Room数据库要用注解处理器生成代码，KSP版本要跟Kotlin版本(2.0.20)对上。
+    // 如果编译报"找不到匹配的KSP版本"这类错，去KSP官方Release页面
+    // (https://github.com/google/ksp/releases) 找对应2.0.20的最新patch号替换掉。
+    id("com.google.devtools.ksp") version "2.0.20-1.0.25" apply false
 }
