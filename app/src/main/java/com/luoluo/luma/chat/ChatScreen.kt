@@ -31,11 +31,18 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.luoluo.luma.cards.CardManifest
+import com.luoluo.luma.cards.CardRegistry
+import com.luoluo.luma.cards.CardType
+import com.luoluo.luma.host.CardHostApiImpl
+import kotlinx.coroutines.launch
 
 @Composable
 fun ChatScreen(viewModel: ChatViewModel = viewModel()) {
@@ -57,6 +64,27 @@ fun ChatScreen(viewModel: ChatViewModel = viewModel()) {
                 Text("展开设置")
             }
         }
+
+        // 1d：卡片管理区，真正的运行时开关，切一下立刻生效，不用改代码重新编译。
+        val context = LocalContext.current
+        val hostApi = remember(context) { CardHostApiImpl(context) }
+        val scope = rememberCoroutineScope()
+        var cardStates by remember { mutableStateOf<List<Pair<CardManifest, Boolean>>>(emptyList()) }
+
+        LaunchedEffect(Unit) {
+            cardStates = CardRegistry.getAllManifests().map { it to CardRegistry.isCardEnabled(context, it) }
+        }
+
+        CardManagerPanel(cardStates) { cardId, newEnabled ->
+            scope.launch {
+                CardRegistry.setCardEnabled(context, cardId, newEnabled)
+                cardStates = CardRegistry.getAllManifests().map { it to CardRegistry.isCardEnabled(context, it) }
+            }
+        }
+
+        cardStates
+            .filter { (manifest, enabled) -> enabled && manifest.type == CardType.DISPLAY }
+            .forEach { (manifest, _) -> CardRegistry.RenderCard(manifest, hostApi) }
 
         val errorState = viewModel.uiState
         if (errorState is ChatUiState.Error) {
@@ -144,6 +172,32 @@ private fun ProviderSettingsPanel(viewModel: ChatViewModel, onCollapse: () -> Un
 
             TextButton(onClick = onCollapse, modifier = Modifier.fillMaxWidth()) {
                 Text("收起")
+            }
+        }
+    }
+}
+
+@Composable
+private fun CardManagerPanel(cardStates: List<Pair<CardManifest, Boolean>>, onToggle: (String, Boolean) -> Unit) {
+    if (cardStates.isEmpty()) return
+
+    Card(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Text("卡片管理", style = MaterialTheme.typography.titleSmall)
+            cardStates.forEach { (manifest, enabled) ->
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(manifest.name, modifier = Modifier.weight(1f))
+                    Switch(
+                        checked = enabled,
+                        onCheckedChange = { newValue -> onToggle(manifest.id, newValue) }
+                    )
+                }
             }
         }
     }
