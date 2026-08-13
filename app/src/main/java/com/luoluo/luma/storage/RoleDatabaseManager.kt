@@ -31,7 +31,12 @@ object RoleDatabaseManager {
             context.applicationContext,
             RoleDatabase::class.java,
             dbFile.absolutePath
-        ).build()
+        )
+            // 1d给数据库加了新表(版本1→2)。还在开发早期，本地测试数据不重要，
+            // 遇到旧版本数据库直接重建，不做正式迁移脚本。等真正有用户数据了，
+            // 这里要换成写清楚每一步的Migration，不能再用这个偷懒的策略。
+            .fallbackToDestructiveMigration()
+            .build()
 
         openDatabases[roleId] = db
         return db
