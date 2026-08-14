@@ -8,9 +8,11 @@ import android.webkit.JavascriptInterface
 import android.webkit.ValueCallback
 import android.webkit.WebView
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.biometric.BiometricPrompt
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
@@ -156,6 +158,10 @@ class MainActivity : FragmentActivity() {
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // targetSdk 35上系统强制edge-to-edge，内容默认会画到状态栏/导航栏底下。
+        // 这一句负责让状态栏图标颜色跟着主题自动适配深浅色；
+        // 真正"内容自己让出空间不被遮挡"那部分在下面LumaApp()的Modifier里用safeDrawingPadding()做。
+        enableEdgeToEdge()
 
         // 文件选择器的launcher先留着注册，虽然1a阶段用不上，1b/1c做导入功能时会用到。
         registerForActivityResult(
@@ -191,7 +197,11 @@ class MainActivity : FragmentActivity() {
 @Composable
 fun LumaApp() {
     Surface(
-        modifier = Modifier.fillMaxSize(),
+        modifier = Modifier
+            .fillMaxSize()
+            // 关键这行：内容自动避开状态栏顶部、导航栏/手势条底部、挖孔屏这些系统占用区域，
+            // 不加这个，内容会一直顶到屏幕最边缘，跟系统状态栏/导航栏的图标撞在一起。
+            .safeDrawingPadding(),
         color = MaterialTheme.colorScheme.background
     ) {
         ChatScreen()
