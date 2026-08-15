@@ -11,15 +11,20 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
@@ -119,11 +124,14 @@ fun ChatScreen(roleId: String, onOpenRoleManager: () -> Unit) {
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             items(viewModel.messages) { msg ->
-                MessageBubble(msg)
+                MessageBubble(msg, onRetry = { viewModel.retryMessage(msg) })
             }
         }
 
-        InputBar(viewModel)
+        InputBar(viewModel, onSend = {
+            settingsExpanded = false // 发送之后自动收起设置区，把屏幕还给聊天记录
+            viewModel.sendMessage()
+        })
     }
 }
 
@@ -221,26 +229,53 @@ private fun CardManagerPanel(cardStates: List<Pair<CardManifest, Boolean>>, onTo
 }
 
 @Composable
-private fun MessageBubble(msg: ChatMessage) {
+private fun MessageBubble(msg: ChatMessage, onRetry: () -> Unit) {
     val isUser = msg.role == "user"
-    Row(
+    val isFailed = msg.isFailed.value
+
+    Column(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start
+        horizontalAlignment = if (isUser) Alignment.End else Alignment.Start
     ) {
-        Surface(
-            color = if (isUser) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.secondaryContainer,
-            shape = MaterialTheme.shapes.medium
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start,
+            verticalAlignment = Alignment.CenterVertically
         ) {
+            if (isFailed && isUser) {
+                // 失败图标放在气泡左边(用户消息靠右显示，图标自然贴在气泡外侧，不会被气泡挡住)
+                IconButton(onClick = onRetry, modifier = Modifier.size(28.dp)) {
+                    Icon(
+                        imageVector = Icons.Default.Warning,
+                        contentDescription = "发送失败，点击重试",
+                        tint = MaterialTheme.colorScheme.error
+                    )
+                }
+                Spacer(modifier = Modifier.width(4.dp))
+            }
+            Surface(
+                color = if (isUser) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.secondaryContainer,
+                shape = MaterialTheme.shapes.medium
+            ) {
+                Text(
+                    text = msg.content.value.ifEmpty { "…" },
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+                )
+            }
+        }
+        if (isFailed) {
             Text(
-                text = msg.content.value.ifEmpty { "…" },
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+                text = "发送失败，点旁边的图标重试",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.error,
+                modifier = Modifier.padding(top = 2.dp)
             )
         }
     }
 }
 
 @Composable
-private fun InputBar(viewModel: ChatViewModel) {
+private fun InputBar(viewModel: ChatViewModel, onSend: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -261,7 +296,7 @@ private fun InputBar(viewModel: ChatViewModel) {
                 CircularProgressIndicator(modifier = Modifier.height(24.dp).width(24.dp))
             }
         } else {
-            Button(onClick = { viewModel.sendMessage() }) {
+            Button(onClick = onSend) {
                 Text("发送")
             }
         }
