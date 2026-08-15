@@ -27,6 +27,13 @@ import kotlinx.coroutines.withContext
  * 切换角色的时候，ChatScreen那边会用roleId当key重新创建一个新的ChatViewModel实例，
  * 新实例的init块会自动去读对应角色数据库里的聊天记录——不用在这个类里额外写"切换角色"的逻辑，
  * 靠"整个ViewModel换一个新的"这种方式来达到同样效果，更不容易漏掉某个状态没重置。
+ *
+ * 这次改动：发送失败不再只靠页面顶部一条通用错误提示——那样会跟设置区一起
+ * 把聊天记录挤没，而且失败之后AI那个空气泡会一直卡在"…"，很奇怪。现在改成：
+ * 失败了就把空的AI气泡撤掉，把失败标记打在具体那条用户消息上（ChatMessage.isFailed），
+ * 界面上那条消息旁边会出现一个小警告图标，点一下调retryMessage()原样重发。
+ * uiState.Error这个通用错误只留给"压根没法发"的情况（比如provider信息没填），
+ * 跟"发了但失败了"这种消息级的失败分开处理。
  */
 class ChatViewModel(application: Application, roleId: String) : AndroidViewModel(application) {
 
@@ -64,6 +71,7 @@ class ChatViewModel(application: Application, roleId: String) : AndroidViewModel
         if (uiState is ChatUiState.Sending) return // 上一条还没发完，先不让连续发
 
         if (baseUrl.isBlank() || apiKey.isBlank() || model.isBlank()) {
+            // 这种"压根没法发"的情况才用通用错误提示，不涉及具体某条消息
             uiState = ChatUiState.Error("先把上面的baseUrl/apiKey/model填好")
             return
         }
@@ -72,6 +80,17 @@ class ChatViewModel(application: Application, roleId: String) : AndroidViewModel
         messages.add(userMsg)
         inputText = ""
 
+        performSend(userMsg)
+    }
+
+    /** 点失败消息旁边的警告图标调这个，原样重发这条消息，不用手动重打一遍 */
+    fun retryMessage(userMsg: ChatMessage) {
+        if (uiState is ChatUiState.Sending) return
+        userMsg.isFailed.value = false
+        performSend(userMsg)
+    }
+
+    private fun performSend(userMsg: ChatMessage) {
         val aiMsg = ChatMessage(role = "assistant", content = "")
         messages.add(aiMsg)
 
@@ -110,7 +129,11 @@ class ChatViewModel(application: Application, roleId: String) : AndroidViewModel
                     dao.insert(ChatMessageEntity(role = aiMsg.role, content = aiMsg.content.value, timestamp = now + 1))
                 }
             } catch (e: Exception) {
-                uiState = ChatUiState.Error(e.message ?: "请求出错")
+                // 失败了：撤掉那个空的AI气泡，把失败标记打回用户那条消息上，
+                // 不再用页面顶部的通用错误提示——那样会跟设置区一起把聊天记录挤没。
+                messages.remove(aiMsg)
+                userMsg.isFailed.value = true
+                uiState = ChatUiState.Idle
             }
         }
     }
