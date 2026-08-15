@@ -10,8 +10,8 @@ import androidx.room.Room
  * 删掉一个角色，只要把 roles/<roleId>/ 这整个文件夹删掉就行，
  * 不会影响到其他角色的数据——这是"各归各"这个决定在文件系统层面的体现。
  *
- * 1c范围内只有一个默认角色("default")，因为角色管理界面还没做（那是后面的事）。
- * 以后有了角色切换功能，调用方只要把roleId换成真实角色id，其余逻辑不用动。
+ * 1e加了角色管理界面(role包下)，角色的"名单"和"当前是谁"存在RoleManager里，
+ * 这个类只管"给定一个roleId，打开/关闭/删除它对应的数据库文件"，不关心角色叫什么名字。
  */
 object RoleDatabaseManager {
 
@@ -40,5 +40,17 @@ object RoleDatabaseManager {
 
         openDatabases[roleId] = db
         return db
+    }
+
+    /**
+     * 删角色用的：先把开着的数据库连接关掉（不关就删文件，Windows这种系统会直接报错，
+     * 安卓这边虽然一般能删掉，但残留一个开着的连接是隐患，还是老老实实先关再删），
+     * 然后把这个角色的整个文件夹删掉，聊天记录、卡片数据跟着一起消失，删得干净。
+     */
+    @Synchronized
+    fun closeAndDelete(context: Context, roleId: String) {
+        openDatabases.remove(roleId)?.close()
+        val roleDir = context.filesDir.resolve("roles").resolve(roleId)
+        roleDir.deleteRecursively()
     }
 }
