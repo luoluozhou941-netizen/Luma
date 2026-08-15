@@ -81,6 +81,7 @@ dependencies {
     implementation("androidx.compose.ui:ui-graphics")
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material3:material3")
+    implementation("androidx.compose.material:material-icons-core")
     implementation("androidx.biometric:biometric:1.1.0")
 
     // 1b新增：AI通信用OkHttp手写请求(含流式SSE手动解析)，用协程处理异步
