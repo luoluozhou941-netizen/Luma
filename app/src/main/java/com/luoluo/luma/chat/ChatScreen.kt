@@ -44,8 +44,20 @@ import com.luoluo.luma.cards.CardType
 import com.luoluo.luma.host.CardHostApiImpl
 import kotlinx.coroutines.launch
 
+/**
+ * 1e：加了roleId参数和onOpenRoleManager回调。
+ * viewModel按roleId当key创建——切换角色时roleId变了，Compose会整个换一个新的ChatViewModel实例，
+ * 新实例的init块自动去读那个角色的聊天记录，不用在这个Composable里手写"切换角色要重置什么状态"。
+ */
 @Composable
-fun ChatScreen(viewModel: ChatViewModel = viewModel()) {
+fun ChatScreen(roleId: String, onOpenRoleManager: () -> Unit) {
+    val context = LocalContext.current
+    val application = context.applicationContext as android.app.Application
+    val viewModel: ChatViewModel = viewModel(
+        key = roleId,
+        factory = ChatViewModel.factory(application, roleId)
+    )
+
     var settingsExpanded by remember { mutableStateOf(true) }
     val listState = rememberLazyListState()
 
@@ -57,6 +69,12 @@ fun ChatScreen(viewModel: ChatViewModel = viewModel()) {
 
     Column(modifier = Modifier.fillMaxSize()) {
 
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+            TextButton(onClick = onOpenRoleManager) {
+                Text("角色管理")
+            }
+        }
+
         if (settingsExpanded) {
             ProviderSettingsPanel(viewModel) { settingsExpanded = false }
         } else {
@@ -65,20 +83,19 @@ fun ChatScreen(viewModel: ChatViewModel = viewModel()) {
             }
         }
 
-        // 1d：卡片管理区，真正的运行时开关，切一下立刻生效，不用改代码重新编译。
-        val context = LocalContext.current
-        val hostApi = remember(context) { CardHostApiImpl(context) }
+        // 1d+1e：卡片管理区，开关状态跟着当前角色走(roleId变了，重新读一遍这个角色的开关状态)。
+        val hostApi = remember(context, roleId) { CardHostApiImpl(context, roleId) }
         val scope = rememberCoroutineScope()
         var cardStates by remember { mutableStateOf<List<Pair<CardManifest, Boolean>>>(emptyList()) }
 
-        LaunchedEffect(Unit) {
-            cardStates = CardRegistry.getAllManifests().map { it to CardRegistry.isCardEnabled(context, it) }
+        LaunchedEffect(roleId) {
+            cardStates = CardRegistry.getAllManifests().map { it to CardRegistry.isCardEnabled(context, roleId, it) }
         }
 
         CardManagerPanel(cardStates) { cardId, newEnabled ->
             scope.launch {
-                CardRegistry.setCardEnabled(context, cardId, newEnabled)
-                cardStates = CardRegistry.getAllManifests().map { it to CardRegistry.isCardEnabled(context, it) }
+                CardRegistry.setCardEnabled(context, roleId, cardId, newEnabled)
+                cardStates = CardRegistry.getAllManifests().map { it to CardRegistry.isCardEnabled(context, roleId, it) }
             }
         }
 
