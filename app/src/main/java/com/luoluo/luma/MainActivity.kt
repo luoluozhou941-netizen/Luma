@@ -16,10 +16,18 @@ import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
 import com.luoluo.luma.chat.ChatScreen
+import com.luoluo.luma.role.RoleManager
+import com.luoluo.luma.role.RoleScreen
 import com.luoluo.luma.ui.theme.LumaTheme
 import java.io.File
 import java.io.FileOutputStream
@@ -194,6 +202,11 @@ class MainActivity : FragmentActivity() {
     }
 }
 
+/**
+ * 1e：这里做了个最简单的"导航"——就是个布尔开关切两个Composable，
+ * 不是引入正式的Navigation库。角色管理这一个跳转场景用不上那么重的东西，
+ * 真要上Navigation-Compose，等界面多到需要正式路由系统的时候再加。
+ */
 @Composable
 fun LumaApp() {
     Surface(
@@ -204,6 +217,26 @@ fun LumaApp() {
             .safeDrawingPadding(),
         color = MaterialTheme.colorScheme.background
     ) {
-        ChatScreen()
+        val context = LocalContext.current
+        var showRoleManager by remember { mutableStateOf(false) }
+        var activeRoleId by remember { mutableStateOf<String?>(null) }
+
+        LaunchedEffect(Unit) {
+            activeRoleId = RoleManager.getActiveRoleId(context)
+        }
+
+        if (showRoleManager) {
+            RoleScreen(onDone = {
+                activeRoleId = RoleManager.getActiveRoleId(context)
+                showRoleManager = false
+            })
+        } else {
+            activeRoleId?.let { roleId ->
+                ChatScreen(
+                    roleId = roleId,
+                    onOpenRoleManager = { showRoleManager = true }
+                )
+            }
+        }
     }
 }
