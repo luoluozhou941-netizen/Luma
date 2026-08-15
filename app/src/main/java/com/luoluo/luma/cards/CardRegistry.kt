@@ -15,9 +15,10 @@ import com.luoluo.luma.storage.RoleDatabaseManager
  * 约束的是具体的卡片实现（比如TestCardScreen），不包括这个管理器本身。
  * 管理器就是底座里"卡片管理器"这个组件，它当然要能碰到存储层。
  *
- * 开关状态是真正的运行时开关：存在数据库里，界面上有Switch可以直接切，
+ * 开关状态是真正的运行时开关：存在**当前角色自己的**数据库里，界面上有Switch可以直接切，
  * 不用改代码重新编译。manifest里的enabled字段变成了"默认值"——
  * 第一次装机、还没手动切换过的时候用这个值，切过一次之后就以存储里的值为准。
+ * 这个开关是按角色分别存的：A角色关掉了健康卡片，不影响B角色那边这张卡片是不是开着。
  *
  * 新增一张卡片的步骤：
  * 1. 在cards/下建一个新文件夹（比如cards/health/），写自己的manifest + 界面Composable，
@@ -35,16 +36,16 @@ object CardRegistry {
 
     private fun enabledKey(cardId: String) = "card-manager:enabled:$cardId"
 
-    /** 读这张卡片现在到底是开还是关——先看有没有手动切换过，没有就用manifest里的默认值 */
-    suspend fun isCardEnabled(context: Context, manifest: CardManifest): Boolean {
-        val dao = RoleDatabaseManager.getDatabase(context).cardKeyValueDao()
+    /** 读这张卡片在当前角色下是开还是关——先看这个角色有没有手动切换过，没有就用manifest里的默认值 */
+    suspend fun isCardEnabled(context: Context, roleId: String, manifest: CardManifest): Boolean {
+        val dao = RoleDatabaseManager.getDatabase(context, roleId).cardKeyValueDao()
         val stored = dao.get(enabledKey(manifest.id))?.value
         return stored?.toBooleanStrictOrNull() ?: manifest.enabled
     }
 
-    /** 界面上的开关调这个，立刻生效，不用重新编译 */
-    suspend fun setCardEnabled(context: Context, cardId: String, enabled: Boolean) {
-        val dao = RoleDatabaseManager.getDatabase(context).cardKeyValueDao()
+    /** 界面上的开关调这个，只影响当前这个角色，立刻生效，不用重新编译 */
+    suspend fun setCardEnabled(context: Context, roleId: String, cardId: String, enabled: Boolean) {
+        val dao = RoleDatabaseManager.getDatabase(context, roleId).cardKeyValueDao()
         dao.set(CardKeyValueEntity(key = enabledKey(cardId), value = enabled.toString()))
     }
 
