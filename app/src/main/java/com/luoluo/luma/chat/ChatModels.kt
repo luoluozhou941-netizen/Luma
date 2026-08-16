@@ -29,13 +29,13 @@ enum class ApiFormat {
  * 界面上读 msg.content.value 的地方会被Compose直接跟踪，content一变就立刻重画
  * 对应的那一小块，不用再折腾整条消息对象的替换。
  *
- * isFailed标记这条消息发送失败了没——挂在具体消息上，而不是只靠页面顶部
- * 一条通用错误提示。失败的消息旁边会出现一个小警告图标，点一下重试。
+ * 没有isFailed这种消息级失败标记——讨论过带警告图标+重试按钮的方案，
+ * 最后放弃了，改成"失败了就把消息从列表里退回输入框"这个更简洁的思路，
+ * 不需要给消息本身挂状态，见ChatViewModel.performReply()。
  */
 data class ChatMessage(
     val role: String,
-    val content: MutableState<String> = mutableStateOf(""),
-    val isFailed: MutableState<Boolean> = mutableStateOf(false)
+    val content: MutableState<String> = mutableStateOf("")
 ) {
     constructor(role: String, content: String) : this(role, mutableStateOf(content))
 }
