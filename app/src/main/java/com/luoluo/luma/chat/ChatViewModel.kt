@@ -2,6 +2,7 @@ package com.luoluo.luma.chat
 
 import android.app.Application
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -13,27 +14,33 @@ import androidx.lifecycle.viewmodel.viewModelFactory
 import com.luoluo.luma.storage.ChatMessageEntity
 import com.luoluo.luma.storage.RoleDatabaseManager
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
- * 1b+1c+1e的ViewModel。
+ * 1b+1c+1e的ViewModel，这次加了防抖回复机制。
  *
  * provider配置目前还是内存里的几个可编辑字段，不落盘、不做管理界面——
  * 这一步只求"能对话+记录能存住"，正式的provider管理和多用途模型调度(usageBindings)留给后面。
  *
- * 1e新增：roleId不再写死，是外面(ChatScreen)传进来的"当前激活角色"。
- * 切换角色的时候，ChatScreen那边会用roleId当key重新创建一个新的ChatViewModel实例，
- * 新实例的init块会自动去读对应角色数据库里的聊天记录——不用在这个类里额外写"切换角色"的逻辑，
- * 靠"整个ViewModel换一个新的"这种方式来达到同样效果，更不容易漏掉某个状态没重置。
+ * 1e：roleId不再写死，是外面(ChatScreen)传进来的"当前激活角色"，切换角色时靠
+ * viewModel(key=roleId)整个换一个新实例，init块自动读那个角色的聊天记录。
  *
- * 这次改动：发送失败不再只靠页面顶部一条通用错误提示——那样会跟设置区一起
- * 把聊天记录挤没，而且失败之后AI那个空气泡会一直卡在"…"，很奇怪。现在改成：
- * 失败了就把空的AI气泡撤掉，把失败标记打在具体那条用户消息上（ChatMessage.isFailed），
- * 界面上那条消息旁边会出现一个小警告图标，点一下调retryMessage()原样重发。
- * uiState.Error这个通用错误只留给"压根没法发"的情况（比如provider信息没填），
- * 跟"发了但失败了"这种消息级的失败分开处理。
+ * 这次的核心改动——只有一个"发送"键，参考了旧JS版本(js/99-main.js)里
+ * scheduleReply/cancelReply/triggerReply那套设计：
+ * 1. 点发送：消息进列表，(重新)启动一个倒计时，界面上不显示这个倒计时
+ * 2. 倒计时期间再发消息，倒计时重新算——只有真正停下来一段时间，AI才会接话
+ * 3. 倒计时走完才调用AI，不是点发送立刻调用
+ *
+ * 失败处理：没有做消息级的失败标记/重试按钮(讨论过带警告图标的方案，最后放弃了)。
+ * 失败了就把这一轮还没等到回复的消息从列表里"退"回输入框，撤掉空AI气泡，
+ * 发送键本身没有任何特殊状态——用户看一眼退回来的文字，直接再点发送就是重试，
+ * 不需要专门的重试机制，因为退回输入框这个动作本身就已经把状态复原了。
  */
 class ChatViewModel(application: Application, roleId: String) : AndroidViewModel(application) {
 
@@ -41,11 +48,17 @@ class ChatViewModel(application: Application, roleId: String) : AndroidViewModel
         .getDatabase(application, roleId)
         .chatMessageDao()
 
+    private val _errorEvents = Channel<String>(Channel.BUFFERED)
+    val errorEvents = _errorEvents.receiveAsFlow()
+
     var baseUrl by mutableStateOf("")
     var apiKey by mutableStateOf("")
     var model by mutableStateOf("")
     var apiFormat by mutableStateOf(ApiFormat.OPENAI)
     var useStreaming by mutableStateOf(true)
+
+    /** 倒计时时长，存秒。设置界面上不管用户想填分钟还是秒，最终都换算成这个存。 */
+    var replyDelaySeconds by mutableIntStateOf(120)
 
     var systemPrompt by mutableStateOf("你是Luma，一个温暖的AI陪伴助手。")
 
@@ -54,6 +67,8 @@ class ChatViewModel(application: Application, roleId: String) : AndroidViewModel
     var inputText by mutableStateOf("")
     var uiState: ChatUiState by mutableStateOf(ChatUiState.Idle)
         private set
+
+    private var replyJob: Job? = null
 
     init {
         // 启动/切换角色时把这个角色的聊天记录读回来
@@ -65,32 +80,44 @@ class ChatViewModel(application: Application, roleId: String) : AndroidViewModel
         }
     }
 
+    /**
+     * 点"发送"调这个。只做两件事：把消息加进列表、(重新)排一个倒计时。
+     * 不在这里直接调AI——真正调AI是倒计时走完之后，在scheduleReply里触发的。
+     */
     fun sendMessage() {
         val text = inputText.trim()
         if (text.isEmpty()) return
-        if (uiState is ChatUiState.Sending) return // 上一条还没发完，先不让连续发
 
         if (baseUrl.isBlank() || apiKey.isBlank() || model.isBlank()) {
-            // 这种"压根没法发"的情况才用通用错误提示，不涉及具体某条消息
             uiState = ChatUiState.Error("先把上面的baseUrl/apiKey/model填好")
             return
         }
 
-        val userMsg = ChatMessage(role = "user", content = text)
-        messages.add(userMsg)
+        messages.add(ChatMessage(role = "user", content = text))
         inputText = ""
 
-        performSend(userMsg)
+        scheduleReply()
     }
 
-    /** 点失败消息旁边的警告图标调这个，原样重发这条消息，不用手动重打一遍 */
-    fun retryMessage(userMsg: ChatMessage) {
-        if (uiState is ChatUiState.Sending) return
-        userMsg.isFailed.value = false
-        performSend(userMsg)
+    private fun scheduleReply() {
+        replyJob?.cancel() // 之前排的队还没到点，取消掉重新排——这就是"倒计时被重置"的实现
+        replyJob = viewModelScope.launch {
+            delay(replyDelaySeconds * 1000L)
+            performReply()
+        }
     }
 
-    private fun performSend(userMsg: ChatMessage) {
+    /** 这一轮还没等到AI回复的消息——从"上一条成功回复的assistant消息"往后数，都算 */
+    private fun pendingUserMessages(): List<ChatMessage> {
+        val lastAnsweredIndex = messages.indexOfLast { it.role == "assistant" && it.content.value.isNotBlank() }
+        val pending = if (lastAnsweredIndex == -1) messages.toList() else messages.drop(lastAnsweredIndex + 1)
+        return pending.filter { it.role == "user" }
+    }
+
+    private suspend fun performReply() {
+        val pending = pendingUserMessages()
+        if (pending.isEmpty()) return // 没有还没回复的消息，没什么好回的
+
         val aiMsg = ChatMessage(role = "assistant", content = "")
         messages.add(aiMsg)
 
@@ -101,40 +128,48 @@ class ChatViewModel(application: Application, roleId: String) : AndroidViewModel
             defaultModel = model,
             apiFormat = apiFormat
         )
-        // 发给AI的历史不包含刚加进去的这条空assistant消息本身
         val historyForRequest = messages.filter { it !== aiMsg }
 
         uiState = ChatUiState.Sending
 
-        viewModelScope.launch {
-            try {
-                if (useStreaming) {
-                    AiClient.streamCallFlow(cfg, systemPrompt, historyForRequest)
-                        .flowOn(Dispatchers.IO) // 网络读在IO线程跑，collect{}这块还是在主线程收
-                        .collect { fullTextSoFar ->
-                            aiMsg.content.value = fullTextSoFar
-                        }
-                } else {
-                    val result = withContext(Dispatchers.IO) {
-                        AiClient.callNonStream(cfg, systemPrompt, historyForRequest)
+        try {
+            if (useStreaming) {
+                AiClient.streamCallFlow(cfg, systemPrompt, historyForRequest)
+                    .flowOn(Dispatchers.IO)
+                    .collect { fullTextSoFar ->
+                        aiMsg.content.value = fullTextSoFar
                     }
-                    aiMsg.content.value = result
+            } else {
+                val result = withContext(Dispatchers.IO) {
+                    AiClient.callNonStream(cfg, systemPrompt, historyForRequest)
                 }
-                uiState = ChatUiState.Idle
-
-                // 收完整回复之后再落盘，两条一起存（用户那条+AI回的这条）
-                withContext(Dispatchers.IO) {
-                    val now = System.currentTimeMillis()
-                    dao.insert(ChatMessageEntity(role = userMsg.role, content = userMsg.content.value, timestamp = now))
-                    dao.insert(ChatMessageEntity(role = aiMsg.role, content = aiMsg.content.value, timestamp = now + 1))
-                }
-            } catch (e: Exception) {
-                // 失败了：撤掉那个空的AI气泡，把失败标记打回用户那条消息上，
-                // 不再用页面顶部的通用错误提示——那样会跟设置区一起把聊天记录挤没。
-                messages.remove(aiMsg)
-                userMsg.isFailed.value = true
-                uiState = ChatUiState.Idle
+                aiMsg.content.value = result
             }
+
+            // 请求没抛异常，不代表真的收到内容了——有些provider/格式不匹配的情况下，
+            // 会"正常"走完整个流程但一个字都没解析出来，这种也按失败处理。
+            if (aiMsg.content.value.isBlank()) {
+                throw AiClientException("请求没报错，但没收到任何内容——多半是接口返回格式跟预期的对不上")
+            }
+
+            uiState = ChatUiState.Idle
+
+            withContext(Dispatchers.IO) {
+                val now = System.currentTimeMillis()
+                pending.forEachIndexed { i, msg ->
+                    dao.insert(ChatMessageEntity(role = msg.role, content = msg.content.value, timestamp = now + i))
+                }
+                dao.insert(ChatMessageEntity(role = aiMsg.role, content = aiMsg.content.value, timestamp = now + pending.size))
+            }
+        } catch (e: Exception) {
+            // 失败了：撤掉空AI气泡，把这一轮攒的消息从列表里"退"回输入框，
+            // 发送键自然就是原来能点的样子，不用额外处理任何状态。
+            messages.remove(aiMsg)
+            val recoveredText = pending.joinToString("\n") { it.content.value }
+            pending.forEach { messages.remove(it) }
+            inputText = if (inputText.isBlank()) recoveredText else "$recoveredText\n$inputText"
+            uiState = ChatUiState.Idle
+            _errorEvents.trySend(e.message ?: "请求出错，但没有具体错误信息")
         }
     }
 
