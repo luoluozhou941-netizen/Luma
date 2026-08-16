@@ -11,22 +11,20 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -41,6 +39,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.luoluo.luma.cards.CardManifest
@@ -53,6 +52,10 @@ import kotlinx.coroutines.launch
  * 1e：加了roleId参数和onOpenRoleManager回调。
  * viewModel按roleId当key创建——切换角色时roleId变了，Compose会整个换一个新的ChatViewModel实例，
  * 新实例的init块自动去读那个角色的聊天记录，不用在这个Composable里手写"切换角色要重置什么状态"。
+ *
+ * 这次改动：只有一个"发送"按钮，回复是后台防抖触发的(见ChatViewModel)，界面上看不到倒计时。
+ * 失败了不会在消息气泡上留任何标记——ViewModel会把消息退回输入框，这个Composable不用管这件事。
+ * 报错通过errorEvents走Snackbar，自动出现自动消失，不用点确认。
  */
 @Composable
 fun ChatScreen(roleId: String, onOpenRoleManager: () -> Unit) {
@@ -65,6 +68,17 @@ fun ChatScreen(roleId: String, onOpenRoleManager: () -> Unit) {
 
     var settingsExpanded by remember { mutableStateOf(true) }
     val listState = rememberLazyListState()
+    val snackbarHostState = remember { SnackbarHostState() }
+
+    LaunchedEffect(viewModel) {
+        viewModel.errorEvents.collect { message ->
+            snackbarHostState.showSnackbar(
+                message = message,
+                withDismissAction = true,
+                duration = SnackbarDuration.Long
+            )
+        }
+    }
 
     LaunchedEffect(viewModel.messages.size) {
         if (viewModel.messages.isNotEmpty()) {
@@ -72,66 +86,73 @@ fun ChatScreen(roleId: String, onOpenRoleManager: () -> Unit) {
         }
     }
 
-    Column(modifier = Modifier.fillMaxSize()) {
+    Box(modifier = Modifier.fillMaxSize()) {
+        Column(modifier = Modifier.fillMaxSize()) {
 
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-            TextButton(onClick = onOpenRoleManager) {
-                Text("角色管理")
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                TextButton(onClick = onOpenRoleManager) {
+                    Text("角色管理")
+                }
             }
-        }
 
-        if (settingsExpanded) {
-            ProviderSettingsPanel(viewModel) { settingsExpanded = false }
-        } else {
-            TextButton(onClick = { settingsExpanded = true }) {
-                Text("展开设置")
+            if (settingsExpanded) {
+                ProviderSettingsPanel(viewModel) { settingsExpanded = false }
+            } else {
+                TextButton(onClick = { settingsExpanded = true }) {
+                    Text("展开设置")
+                }
             }
-        }
 
-        // 1d+1e：卡片管理区，开关状态跟着当前角色走(roleId变了，重新读一遍这个角色的开关状态)。
-        val hostApi = remember(context, roleId) { CardHostApiImpl(context, roleId) }
-        val scope = rememberCoroutineScope()
-        var cardStates by remember { mutableStateOf<List<Pair<CardManifest, Boolean>>>(emptyList()) }
+            // 1d+1e：卡片管理区，开关状态跟着当前角色走(roleId变了，重新读一遍这个角色的开关状态)。
+            val hostApi = remember(context, roleId) { CardHostApiImpl(context, roleId) }
+            val scope = rememberCoroutineScope()
+            var cardStates by remember { mutableStateOf<List<Pair<CardManifest, Boolean>>>(emptyList()) }
 
-        LaunchedEffect(roleId) {
-            cardStates = CardRegistry.getAllManifests().map { it to CardRegistry.isCardEnabled(context, roleId, it) }
-        }
-
-        CardManagerPanel(cardStates) { cardId, newEnabled ->
-            scope.launch {
-                CardRegistry.setCardEnabled(context, roleId, cardId, newEnabled)
+            LaunchedEffect(roleId) {
                 cardStates = CardRegistry.getAllManifests().map { it to CardRegistry.isCardEnabled(context, roleId, it) }
             }
-        }
 
-        cardStates
-            .filter { (manifest, enabled) -> enabled && manifest.type == CardType.DISPLAY }
-            .forEach { (manifest, _) -> CardRegistry.RenderCard(manifest, hostApi) }
-
-        val errorState = viewModel.uiState
-        if (errorState is ChatUiState.Error) {
-            Text(
-                text = "出错了：${errorState.message}",
-                color = MaterialTheme.colorScheme.error,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
-            )
-        }
-
-        LazyColumn(
-            state = listState,
-            modifier = Modifier.weight(1f).fillMaxWidth(),
-            contentPadding = PaddingValues(12.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            items(viewModel.messages) { msg ->
-                MessageBubble(msg, onRetry = { viewModel.retryMessage(msg) })
+            CardManagerPanel(cardStates) { cardId, newEnabled ->
+                scope.launch {
+                    CardRegistry.setCardEnabled(context, roleId, cardId, newEnabled)
+                    cardStates = CardRegistry.getAllManifests().map { it to CardRegistry.isCardEnabled(context, roleId, it) }
+                }
             }
+
+            cardStates
+                .filter { (manifest, enabled) -> enabled && manifest.type == CardType.DISPLAY }
+                .forEach { (manifest, _) -> CardRegistry.RenderCard(manifest, hostApi) }
+
+            val errorState = viewModel.uiState
+            if (errorState is ChatUiState.Error) {
+                Text(
+                    text = "出错了：${errorState.message}",
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+                )
+            }
+
+            LazyColumn(
+                state = listState,
+                modifier = Modifier.weight(1f).fillMaxWidth(),
+                contentPadding = PaddingValues(12.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                items(viewModel.messages) { msg ->
+                    MessageBubble(msg)
+                }
+            }
+
+            InputBar(viewModel, onSend = {
+                settingsExpanded = false // 发送之后自动收起设置区，把屏幕还给聊天记录
+                viewModel.sendMessage()
+            })
         }
 
-        InputBar(viewModel, onSend = {
-            settingsExpanded = false // 发送之后自动收起设置区，把屏幕还给聊天记录
-            viewModel.sendMessage()
-        })
+        SnackbarHost(
+            hostState = snackbarHostState,
+            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 72.dp)
+        )
     }
 }
 
@@ -195,6 +216,26 @@ private fun ProviderSettingsPanel(viewModel: ChatViewModel, onCollapse: () -> Un
                 )
             }
 
+            Spacer(modifier = Modifier.height(6.dp))
+            // 倒计时时长：界面上不显示倒计时本身，但时长可以调，统一按秒存。
+            // 想填分钟自己换算成秒填进去就行(比如2分钟填120)，不单独做分钟/秒切换的UI。
+            var delayText by remember(viewModel.replyDelaySeconds) {
+                mutableStateOf(viewModel.replyDelaySeconds.toString())
+            }
+            OutlinedTextField(
+                value = delayText,
+                onValueChange = { newValue ->
+                    delayText = newValue
+                    newValue.toIntOrNull()?.let { seconds ->
+                        if (seconds > 0) viewModel.replyDelaySeconds = seconds
+                    }
+                },
+                label = { Text("等待回复的秒数（比如填120就是2分钟）") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = KeyboardType.Number)
+            )
+
             TextButton(onClick = onCollapse, modifier = Modifier.fillMaxWidth()) {
                 Text("收起")
             }
@@ -229,46 +270,19 @@ private fun CardManagerPanel(cardStates: List<Pair<CardManifest, Boolean>>, onTo
 }
 
 @Composable
-private fun MessageBubble(msg: ChatMessage, onRetry: () -> Unit) {
+private fun MessageBubble(msg: ChatMessage) {
     val isUser = msg.role == "user"
-    val isFailed = msg.isFailed.value
-
-    Column(
+    Row(
         modifier = Modifier.fillMaxWidth(),
-        horizontalAlignment = if (isUser) Alignment.End else Alignment.Start
+        horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start,
-            verticalAlignment = Alignment.CenterVertically
+        Surface(
+            color = if (isUser) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.secondaryContainer,
+            shape = MaterialTheme.shapes.medium
         ) {
-            if (isFailed && isUser) {
-                // 失败图标放在气泡左边(用户消息靠右显示，图标自然贴在气泡外侧，不会被气泡挡住)
-                IconButton(onClick = onRetry, modifier = Modifier.size(28.dp)) {
-                    Icon(
-                        imageVector = Icons.Default.Warning,
-                        contentDescription = "发送失败，点击重试",
-                        tint = MaterialTheme.colorScheme.error
-                    )
-                }
-                Spacer(modifier = Modifier.width(4.dp))
-            }
-            Surface(
-                color = if (isUser) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.secondaryContainer,
-                shape = MaterialTheme.shapes.medium
-            ) {
-                Text(
-                    text = msg.content.value.ifEmpty { "…" },
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
-                )
-            }
-        }
-        if (isFailed) {
             Text(
-                text = "发送失败，点旁边的图标重试",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.error,
-                modifier = Modifier.padding(top = 2.dp)
+                text = msg.content.value.ifEmpty { "…" },
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
             )
         }
     }
