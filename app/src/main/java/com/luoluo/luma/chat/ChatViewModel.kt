@@ -89,7 +89,7 @@ class ChatViewModel(application: Application, roleId: String) : AndroidViewModel
         if (text.isEmpty()) return
 
         if (baseUrl.isBlank() || apiKey.isBlank() || model.isBlank()) {
-            uiState = ChatUiState.Error("先把上面的baseUrl/apiKey/model填好")
+            _errorEvents.trySend("先把上面的baseUrl/apiKey/model填好")
             return
         }
 
