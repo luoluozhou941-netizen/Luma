@@ -19,7 +19,6 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Snackbar
@@ -60,7 +59,7 @@ import kotlinx.coroutines.launch
  * 报错通过errorEvents走Snackbar，自动出现自动消失，不用点确认。
  */
 @Composable
-fun ChatScreen(roleId: String, onOpenRoleManager: () -> Unit) {
+fun ChatScreen(roleId: String, onOpenRoleManager: () -> Unit, onOpenModelDispatch: () -> Unit) {
     val context = LocalContext.current
     val application = context.applicationContext as android.app.Application
     val viewModel: ChatViewModel = viewModel(
@@ -97,6 +96,9 @@ fun ChatScreen(roleId: String, onOpenRoleManager: () -> Unit) {
         Column(modifier = Modifier.fillMaxSize()) {
 
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                TextButton(onClick = onOpenModelDispatch) {
+                    Text("模型调度")
+                }
                 TextButton(onClick = onOpenRoleManager) {
                     Text("角色管理")
                 }
@@ -170,50 +172,13 @@ private fun ProviderSettingsPanel(viewModel: ChatViewModel, onCollapse: () -> Un
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
     ) {
         Column(modifier = Modifier.padding(12.dp)) {
-            Text("Provider设置（临时，不落盘）", style = MaterialTheme.typography.titleSmall)
+            // 1f之后baseUrl/apiKey/model/格式不再在这里临时填了，改到"模型调度"里正经管理，
+            // 这个面板现在只剩跟"这个角色怎么收发消息"相关、跟provider配置本身无关的两项。
+            Text("聊天设置", style = MaterialTheme.typography.titleSmall)
             Spacer(modifier = Modifier.height(8.dp))
-
-            OutlinedTextField(
-                value = viewModel.baseUrl,
-                onValueChange = { viewModel.baseUrl = it },
-                label = { Text("baseUrl") },
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true
-            )
-            Spacer(modifier = Modifier.height(6.dp))
-            OutlinedTextField(
-                value = viewModel.apiKey,
-                onValueChange = { viewModel.apiKey = it },
-                label = { Text("apiKey") },
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true
-            )
-            Spacer(modifier = Modifier.height(6.dp))
-            OutlinedTextField(
-                value = viewModel.model,
-                onValueChange = { viewModel.model = it },
-                label = { Text("model") },
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                FilterChip(
-                    selected = viewModel.apiFormat == ApiFormat.OPENAI,
-                    onClick = { viewModel.apiFormat = ApiFormat.OPENAI },
-                    label = { Text("OpenAI格式") }
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                FilterChip(
-                    selected = viewModel.apiFormat == ApiFormat.ANTHROPIC,
-                    onClick = { viewModel.apiFormat = ApiFormat.ANTHROPIC },
-                    label = { Text("Anthropic格式") }
-                )
-            }
 
             Row(
-                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text("流式返回", modifier = Modifier.weight(1f))
