@@ -11,6 +11,8 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
+import com.luoluo.luma.model.ModelDispatchManager
+import com.luoluo.luma.model.UsageType
 import com.luoluo.luma.storage.ChatMessageEntity
 import com.luoluo.luma.storage.RoleDatabaseManager
 import kotlinx.coroutines.Dispatchers
@@ -23,16 +25,20 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
- * 1b+1c+1e的ViewModel，这次加了防抖回复机制。
+ * 1b+1c+1e+1f的ViewModel。
  *
- * provider配置目前还是内存里的几个可编辑字段，不落盘、不做管理界面——
- * 这一步只求"能对话+记录能存住"，正式的provider管理和多用途模型调度(usageBindings)留给后面。
+ * 1f之前：provider配置是内存里的几个可编辑字段，不落盘、不做管理界面。
+ * 1f之后：真正发消息要用哪条provider，改成向ModelDispatchManager按"当前角色+对话用途"
+ * 查——查的时候先看这个角色有没有为"对话"这个用途单独覆盖，没有就落回全局绑定，
+ * 都没配置就报错提示去"模型调度"里设置一下。baseUrl/apiKey/model这些不再是
+ * ViewModel自己的字段了，那些现在归ModelDispatchManager管、有专门的界面去配。
  *
  * 1e：roleId不再写死，是外面(ChatScreen)传进来的"当前激活角色"，切换角色时靠
- * viewModel(key=roleId)整个换一个新实例，init块自动读那个角色的聊天记录。
+ * viewModel(key=roleId)整个换一个新实例，新实例的init块自动去读那个角色的聊天记录，
+ * 不用在这个Composable里手写"切换角色要重置什么状态"。
  *
- * 这次的核心改动——只有一个"发送"键，参考了旧JS版本(js/99-main.js)里
- * scheduleReply/cancelReply/triggerReply那套设计：
+ * 这次的核心改动——只有一个"发送"按钮，回复是后台防抖触发的，参考了旧JS版本
+ * (js/99-main.js)里scheduleReply/cancelReply/triggerReply那套设计：
  * 1. 点发送：消息进列表，(重新)启动一个倒计时，界面上不显示这个倒计时
  * 2. 倒计时期间再发消息，倒计时重新算——只有真正停下来一段时间，AI才会接话
  * 3. 倒计时走完才调用AI，不是点发送立刻调用
@@ -42,7 +48,7 @@ import kotlinx.coroutines.withContext
  * 发送键本身没有任何特殊状态——用户看一眼退回来的文字，直接再点发送就是重试，
  * 不需要专门的重试机制，因为退回输入框这个动作本身就已经把状态复原了。
  */
-class ChatViewModel(application: Application, roleId: String) : AndroidViewModel(application) {
+class ChatViewModel(application: Application, private val roleId: String) : AndroidViewModel(application) {
 
     private val dao = RoleDatabaseManager
         .getDatabase(application, roleId)
@@ -51,10 +57,6 @@ class ChatViewModel(application: Application, roleId: String) : AndroidViewModel
     private val _errorEvents = Channel<String>(Channel.BUFFERED)
     val errorEvents = _errorEvents.receiveAsFlow()
 
-    var baseUrl by mutableStateOf("")
-    var apiKey by mutableStateOf("")
-    var model by mutableStateOf("")
-    var apiFormat by mutableStateOf(ApiFormat.OPENAI)
     var useStreaming by mutableStateOf(true)
 
     /** 倒计时时长，存秒。设置界面上不管用户想填分钟还是秒，最终都换算成这个存。 */
@@ -88,8 +90,8 @@ class ChatViewModel(application: Application, roleId: String) : AndroidViewModel
         val text = inputText.trim()
         if (text.isEmpty()) return
 
-        if (baseUrl.isBlank() || apiKey.isBlank() || model.isBlank()) {
-            _errorEvents.trySend("先把上面的baseUrl/apiKey/model填好")
+        if (ModelDispatchManager.resolveProvider(getApplication(), roleId, UsageType.CHAT) == null) {
+            _errorEvents.trySend("这个角色的「对话」用途还没配置provider，去「模型调度」里设置一下")
             return
         }
 
@@ -121,13 +123,18 @@ class ChatViewModel(application: Application, roleId: String) : AndroidViewModel
         val aiMsg = ChatMessage(role = "assistant", content = "")
         messages.add(aiMsg)
 
-        val cfg = ProviderConfig(
-            id = "temp",
-            baseUrl = baseUrl,
-            apiKey = apiKey,
-            defaultModel = model,
-            apiFormat = apiFormat
-        )
+        // 倒计时期间理论上配置也可能被改掉（比如刚好去模型调度里把provider删了），
+        // 这里再查一次，查不到就跟其他失败一样处理：撤空气泡、消息退回输入框。
+        val cfg = ModelDispatchManager.resolveProvider(getApplication(), roleId, UsageType.CHAT)
+        if (cfg == null) {
+            messages.remove(aiMsg)
+            val recoveredText = pending.joinToString("\n") { it.content.value }
+            pending.forEach { messages.remove(it) }
+            inputText = if (inputText.isBlank()) recoveredText else "$recoveredText\n$inputText"
+            _errorEvents.trySend("这个角色的「对话」用途还没配置provider，去「模型调度」里设置一下")
+            return
+        }
+
         val historyForRequest = messages.filter { it !== aiMsg }
 
         uiState = ChatUiState.Sending
