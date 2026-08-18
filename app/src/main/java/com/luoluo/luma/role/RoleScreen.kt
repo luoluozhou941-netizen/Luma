@@ -33,7 +33,7 @@ import androidx.compose.ui.unit.dp
  * (靠给ChatViewModel换一个新的roleId让它重新读数据库，见ChatScreen.kt)。
  */
 @Composable
-fun RoleScreen(onDone: () -> Unit) {
+fun RoleScreen(onDone: () -> Unit, onOpenModelOverride: (roleId: String, roleName: String) -> Unit) {
     val context = LocalContext.current
     var roles by remember { mutableStateOf(RoleManager.getRoles(context)) }
     var activeId by remember { mutableStateOf(RoleManager.getActiveRoleId(context)) }
@@ -71,6 +71,7 @@ fun RoleScreen(onDone: () -> Unit) {
                             onDone()
                         }) { Text("切换") }
                     }
+                    TextButton(onClick = { onOpenModelOverride(role.id, role.name) }) { Text("模型覆盖") }
                     TextButton(onClick = {
                         RoleManager.deleteRole(context, role.id)
                         refresh()
