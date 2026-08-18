@@ -22,6 +22,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Snackbar
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -46,6 +47,7 @@ import com.luoluo.luma.cards.CardManifest
 import com.luoluo.luma.cards.CardRegistry
 import com.luoluo.luma.cards.CardType
 import com.luoluo.luma.host.CardHostApiImpl
+import com.luoluo.luma.role.RoleManager
 import kotlinx.coroutines.launch
 
 /**
@@ -69,6 +71,11 @@ fun ChatScreen(roleId: String, onOpenRoleManager: () -> Unit) {
     var settingsExpanded by remember { mutableStateOf(true) }
     val listState = rememberLazyListState()
     val snackbarHostState = remember { SnackbarHostState() }
+
+    // 输入框占位文字要跟着角色名字走，角色名字不常变，切角色的时候roleId会变，重新查一次就行
+    val roleName = remember(roleId) {
+        RoleManager.getRoles(context).find { it.id == roleId }?.name ?: "Luma"
+    }
 
     LaunchedEffect(viewModel) {
         viewModel.errorEvents.collect { message ->
@@ -123,15 +130,6 @@ fun ChatScreen(roleId: String, onOpenRoleManager: () -> Unit) {
                 .filter { (manifest, enabled) -> enabled && manifest.type == CardType.DISPLAY }
                 .forEach { (manifest, _) -> CardRegistry.RenderCard(manifest, hostApi) }
 
-            val errorState = viewModel.uiState
-            if (errorState is ChatUiState.Error) {
-                Text(
-                    text = "出错了：${errorState.message}",
-                    color = MaterialTheme.colorScheme.error,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
-                )
-            }
-
             LazyColumn(
                 state = listState,
                 modifier = Modifier.weight(1f).fillMaxWidth(),
@@ -143,7 +141,7 @@ fun ChatScreen(roleId: String, onOpenRoleManager: () -> Unit) {
                 }
             }
 
-            InputBar(viewModel, onSend = {
+            InputBar(viewModel, roleName = roleName, onSend = {
                 settingsExpanded = false // 发送之后自动收起设置区，把屏幕还给聊天记录
                 viewModel.sendMessage()
             })
@@ -152,7 +150,16 @@ fun ChatScreen(roleId: String, onOpenRoleManager: () -> Unit) {
         SnackbarHost(
             hostState = snackbarHostState,
             modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 72.dp)
-        )
+        ) { data ->
+            // 默认Snackbar是深色警告样式（黑框白字），换成跟随主题的浅色调，
+            // 不吓人、不挡视线，颜色会跟着系统动态取色和亮暗模式自动变。
+            Snackbar(
+                snackbarData = data,
+                containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                actionColor = MaterialTheme.colorScheme.primary
+            )
+        }
     }
 }
 
@@ -281,7 +288,7 @@ private fun MessageBubble(msg: ChatMessage) {
             shape = MaterialTheme.shapes.medium
         ) {
             Text(
-                text = msg.content.value.ifEmpty { "…" },
+                text = msg.content.value.trim().ifEmpty { "…" },
                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
             )
         }
@@ -289,7 +296,7 @@ private fun MessageBubble(msg: ChatMessage) {
 }
 
 @Composable
-private fun InputBar(viewModel: ChatViewModel, onSend: () -> Unit) {
+private fun InputBar(viewModel: ChatViewModel, roleName: String, onSend: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -301,7 +308,7 @@ private fun InputBar(viewModel: ChatViewModel, onSend: () -> Unit) {
             value = viewModel.inputText,
             onValueChange = { viewModel.inputText = it },
             modifier = Modifier.weight(1f),
-            placeholder = { Text("对Luma说点什么…") }
+            placeholder = { Text("对${roleName}说点什么…") }
         )
         Spacer(modifier = Modifier.width(8.dp))
 
