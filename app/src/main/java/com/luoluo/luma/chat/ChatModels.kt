@@ -6,13 +6,16 @@ import androidx.compose.runtime.mutableStateOf
 /**
  * 一条provider配置。对应旧JS版 settings.providers 数组里的一项。
  * apiFormat 决定走 OpenAI 兼容格式还是 Anthropic 原生格式。
+ * name是1f加的：用户自己起的名字，比如"DeepSeek走OpenAI兼容"，方便provider存多条的时候认出哪个是哪个。
+ * 给了默认值""，是为了不破坏之前"temp"那种临时构造用法(见ChatViewModel)。
  */
 data class ProviderConfig(
     val id: String,
     val baseUrl: String,
     val apiKey: String,
     val defaultModel: String,
-    val apiFormat: ApiFormat
+    val apiFormat: ApiFormat,
+    val name: String = ""
 )
 
 enum class ApiFormat {
@@ -43,5 +46,4 @@ data class ChatMessage(
 sealed class ChatUiState {
     object Idle : ChatUiState()
     object Sending : ChatUiState()
-    data class Error(val message: String) : ChatUiState()
 }
