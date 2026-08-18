@@ -26,7 +26,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
 import com.luoluo.luma.chat.ChatScreen
+import com.luoluo.luma.model.ModelDispatchScreen
 import com.luoluo.luma.role.RoleManager
+import com.luoluo.luma.role.RoleModelOverrideScreen
 import com.luoluo.luma.role.RoleScreen
 import com.luoluo.luma.ui.theme.LumaTheme
 import java.io.File
@@ -203,10 +205,18 @@ class MainActivity : FragmentActivity() {
 }
 
 /**
- * 1e：这里做了个最简单的"导航"——就是个布尔开关切两个Composable，
- * 不是引入正式的Navigation库。角色管理这一个跳转场景用不上那么重的东西，
- * 真要上Navigation-Compose，等界面多到需要正式路由系统的时候再加。
+ * 1e加了角色管理的时候，这里是个布尔开关切两个Composable。
+ * 1f加了模型调度中心和角色模型覆盖两个新界面之后，一个布尔开关不够用了，
+ * 换成这个小的sealed class记录"现在在哪个界面"——还是手写的轻量切换，
+ * 不是引入正式的Navigation库，界面真的多到需要正式路由系统的时候再换。
  */
+private sealed class Screen {
+    object Chat : Screen()
+    object RoleManager : Screen()
+    object ModelDispatch : Screen()
+    data class RoleModelOverride(val roleId: String, val roleName: String) : Screen()
+}
+
 @Composable
 fun LumaApp() {
     Surface(
@@ -218,24 +228,43 @@ fun LumaApp() {
         color = MaterialTheme.colorScheme.background
     ) {
         val context = LocalContext.current
-        var showRoleManager by remember { mutableStateOf(false) }
+        var screen by remember { mutableStateOf<Screen>(Screen.Chat) }
         var activeRoleId by remember { mutableStateOf<String?>(null) }
 
         LaunchedEffect(Unit) {
             activeRoleId = RoleManager.getActiveRoleId(context)
         }
 
-        if (showRoleManager) {
-            RoleScreen(onDone = {
-                activeRoleId = RoleManager.getActiveRoleId(context)
-                showRoleManager = false
-            })
-        } else {
-            activeRoleId?.let { roleId ->
-                ChatScreen(
-                    roleId = roleId,
-                    onOpenRoleManager = { showRoleManager = true }
+        when (val current = screen) {
+            is Screen.RoleManager -> {
+                RoleScreen(
+                    onDone = {
+                        activeRoleId = RoleManager.getActiveRoleId(context)
+                        screen = Screen.Chat
+                    },
+                    onOpenModelOverride = { roleId, roleName ->
+                        screen = Screen.RoleModelOverride(roleId, roleName)
+                    }
                 )
+            }
+            is Screen.ModelDispatch -> {
+                ModelDispatchScreen(onDone = { screen = Screen.Chat })
+            }
+            is Screen.RoleModelOverride -> {
+                RoleModelOverrideScreen(
+                    roleId = current.roleId,
+                    roleName = current.roleName,
+                    onDone = { screen = Screen.RoleManager }
+                )
+            }
+            is Screen.Chat -> {
+                activeRoleId?.let { roleId ->
+                    ChatScreen(
+                        roleId = roleId,
+                        onOpenRoleManager = { screen = Screen.RoleManager },
+                        onOpenModelDispatch = { screen = Screen.ModelDispatch }
+                    )
+                }
             }
         }
     }
