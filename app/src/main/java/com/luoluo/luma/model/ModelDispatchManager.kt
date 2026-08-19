@@ -17,6 +17,10 @@ import java.util.UUID
  * 3. 角色层覆盖——某个角色如果某个用途想跟全局不一样，单独存一条覆盖；
  *    没被覆盖的用途，查询的时候自动落回全局绑定那条（见resolveProvider）
  *
+ * apiKey是敏感数据，不明文存：存之前用ProviderCryptoManager加密，读出来的时候解密，
+ * 这把钥匙存在Android Keystore里、不需要每次验证指纹（详见ProviderCryptoManager的注释，
+ * 跟给日记/信件用的那把钥匙是分开的两回事）。baseUrl/model不算敏感信息，继续明文存。
+ *
  * 删除provider的规则：如果这条provider正被全局或者某个角色绑着，不允许删，
  * 要求先去改绑定——不做"删了自动变成空绑定"这种，那样容易让人在不知情的情况下
  * 突然发不出消息。
@@ -37,11 +41,18 @@ object ModelDispatchManager {
         val arr = JSONArray(json)
         return (0 until arr.length()).map { i ->
             val obj = arr.getJSONObject(i)
+            val decryptedApiKey = try {
+                ProviderCryptoManager.decrypt(obj.getString("apiKey"))
+            } catch (e: Exception) {
+                // 解不开：可能是数据损坏，也可能是加这套加密之前存的老明文数据。
+                // 不让整个列表崩掉，这条的apiKey当作空处理，用户进编辑界面重新填一下就行。
+                ""
+            }
             ProviderConfig(
                 id = obj.getString("id"),
                 name = obj.optString("name", ""),
                 baseUrl = obj.getString("baseUrl"),
-                apiKey = obj.getString("apiKey"),
+                apiKey = decryptedApiKey,
                 defaultModel = obj.getString("defaultModel"),
                 apiFormat = ApiFormat.valueOf(obj.getString("apiFormat"))
             )
@@ -55,7 +66,7 @@ object ModelDispatchManager {
                 put("id", p.id)
                 put("name", p.name)
                 put("baseUrl", p.baseUrl)
-                put("apiKey", p.apiKey)
+                put("apiKey", ProviderCryptoManager.encrypt(p.apiKey))
                 put("defaultModel", p.defaultModel)
                 put("apiFormat", p.apiFormat.name)
             })
