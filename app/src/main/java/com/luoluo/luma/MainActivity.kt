@@ -26,10 +26,12 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
 import com.luoluo.luma.chat.ChatScreen
+import com.luoluo.luma.memory.MemoryScreen
 import com.luoluo.luma.model.ModelDispatchScreen
 import com.luoluo.luma.role.RoleManager
 import com.luoluo.luma.role.RoleModelOverrideScreen
 import com.luoluo.luma.role.RoleScreen
+import com.luoluo.luma.user.UserProfileScreen
 import com.luoluo.luma.ui.theme.LumaTheme
 import java.io.File
 import java.io.FileOutputStream
@@ -214,6 +216,8 @@ private sealed class Screen {
     object Chat : Screen()
     object RoleManager : Screen()
     object ModelDispatch : Screen()
+    object UserProfile : Screen()
+    data class Memory(val roleId: String, val roleName: String) : Screen()
     data class RoleModelOverride(val roleId: String, val roleName: String) : Screen()
 }
 
@@ -250,6 +254,16 @@ fun LumaApp() {
             is Screen.ModelDispatch -> {
                 ModelDispatchScreen(onDone = { screen = Screen.Chat })
             }
+            is Screen.UserProfile -> {
+                UserProfileScreen(onDone = { screen = Screen.Chat })
+            }
+            is Screen.Memory -> {
+                MemoryScreen(
+                    roleId = current.roleId,
+                    roleName = current.roleName,
+                    onDone = { screen = Screen.Chat }
+                )
+            }
             is Screen.RoleModelOverride -> {
                 RoleModelOverrideScreen(
                     roleId = current.roleId,
@@ -259,10 +273,15 @@ fun LumaApp() {
             }
             is Screen.Chat -> {
                 activeRoleId?.let { roleId ->
+                    val roleName = remember(roleId) {
+                        RoleManager.getRoles(context).find { it.id == roleId }?.name ?: "Luma"
+                    }
                     ChatScreen(
                         roleId = roleId,
                         onOpenRoleManager = { screen = Screen.RoleManager },
-                        onOpenModelDispatch = { screen = Screen.ModelDispatch }
+                        onOpenModelDispatch = { screen = Screen.ModelDispatch },
+                        onOpenMemory = { screen = Screen.Memory(roleId, roleName) },
+                        onOpenUserProfile = { screen = Screen.UserProfile }
                     )
                 }
             }
