@@ -11,6 +11,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
+import com.luoluo.luma.memory.MemoryManager
 import com.luoluo.luma.model.ModelDispatchManager
 import com.luoluo.luma.model.UsageType
 import com.luoluo.luma.storage.ChatMessageEntity
@@ -63,6 +64,20 @@ class ChatViewModel(application: Application, private val roleId: String) : Andr
     var replyDelaySeconds by mutableIntStateOf(120)
 
     var systemPrompt by mutableStateOf("你是Luma，一个温暖的AI陪伴助手。")
+
+    /**
+     * 1g：真正发给AI的system prompt = 角色本身的设定（目前还是写死的占位文本，
+     * 等角色设定词补完那一步做完就会变成每个角色自己能编辑的文本）+ 这个角色
+     * 能看到的"一直带着"的记忆卡片。没有always卡片的时候，就是原样的systemPrompt，
+     * 不会多出奇怪的空段落。
+     */
+    private fun buildEffectiveSystemPrompt(): String {
+        val alwaysCards = MemoryManager.getAlwaysCardsForRole(getApplication(), roleId)
+        if (alwaysCards.isEmpty()) return systemPrompt
+
+        val memoryBlock = alwaysCards.joinToString("\n") { "- ${it.title}：${it.content}" }
+        return "$systemPrompt\n\n（以下是关于我们的一些长期记忆，仅供你参考，不是对方刚说的话）\n$memoryBlock"
+    }
 
     val messages = mutableStateListOf<ChatMessage>()
 
@@ -136,19 +151,20 @@ class ChatViewModel(application: Application, private val roleId: String) : Andr
         }
 
         val historyForRequest = messages.filter { it !== aiMsg }
+        val effectiveSystemPrompt = buildEffectiveSystemPrompt()
 
         uiState = ChatUiState.Sending
 
         try {
             if (useStreaming) {
-                AiClient.streamCallFlow(cfg, systemPrompt, historyForRequest)
+                AiClient.streamCallFlow(cfg, effectiveSystemPrompt, historyForRequest)
                     .flowOn(Dispatchers.IO)
                     .collect { fullTextSoFar ->
                         aiMsg.content.value = fullTextSoFar
                     }
             } else {
                 val result = withContext(Dispatchers.IO) {
-                    AiClient.callNonStream(cfg, systemPrompt, historyForRequest)
+                    AiClient.callNonStream(cfg, effectiveSystemPrompt, historyForRequest)
                 }
                 aiMsg.content.value = result
             }
