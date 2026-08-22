@@ -59,7 +59,13 @@ import kotlinx.coroutines.launch
  * 报错通过errorEvents走Snackbar，自动出现自动消失，不用点确认。
  */
 @Composable
-fun ChatScreen(roleId: String, onOpenRoleManager: () -> Unit, onOpenModelDispatch: () -> Unit) {
+fun ChatScreen(
+    roleId: String,
+    onOpenRoleManager: () -> Unit,
+    onOpenModelDispatch: () -> Unit,
+    onOpenMemory: () -> Unit,
+    onOpenUserProfile: () -> Unit
+) {
     val context = LocalContext.current
     val application = context.applicationContext as android.app.Application
     val viewModel: ChatViewModel = viewModel(
@@ -96,6 +102,12 @@ fun ChatScreen(roleId: String, onOpenRoleManager: () -> Unit, onOpenModelDispatc
         Column(modifier = Modifier.fillMaxSize()) {
 
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                TextButton(onClick = onOpenUserProfile) {
+                    Text("我是谁")
+                }
+                TextButton(onClick = onOpenMemory) {
+                    Text("记忆")
+                }
                 TextButton(onClick = onOpenModelDispatch) {
                     Text("模型调度")
                 }
